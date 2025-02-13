@@ -1,7 +1,8 @@
 # bnfx
 Grammar slicing and dicing
 
-In short: it's ANTLR-style EBNF, with re2c-style token definitions.
+In short: it's [ANTLR](https://www.antlr3.org/)-style EBNF,
+with [re2c](https://re2c.org/)-style token definitions.
 
 The intent is to have a single grammar definition which can export to
 a set of targets that I care about, primarily:
@@ -9,7 +10,7 @@ a set of targets that I care about, primarily:
   Lemon (for fast parsing),
   tree-sitter (for editor support).
 
-There is also support for generating railroad diagrams.
+There is also support for generating [railroad diagrams](https://github.com/tabatkins/railroad-diagrams).
 Currently text only. Eventually I'll add an HTML-embedding-SVGs mode.
 
 Currently, bnfx files do not support embedded action code.
@@ -22,10 +23,8 @@ Generally, those sorts of assumptions are not checked,
 since it is anticipated that external tools will be doing the checking.
 As is, bnfx is not meant to be a standalone one-stop-shop sort of tool.
 
+
 ## Usage
-
-See `grammars/` directory for some examples of bnfx syntax.
-
 
 ```
 $ cat grammars/json.bnfx
@@ -105,6 +104,7 @@ _COMMA_value_star ::= _COMMA_value_star _COMMA_value.
 _COMMA_value_star ::= .
 ```
 
+Since ANTLR support EBNF itself, no synthetic rules are needed.
 
 ```
 $ uv run bnfx.py grammars/json.bnfx --to antlr
@@ -229,9 +229,14 @@ elements ::=
                        ╰──────────────────────────────────╯        
 ```
 
+## See Also
+- [kgt](https://github.com/katef/kgt): very similar functionality for a disjoint set of grammar formats
+- [libfsm](https://github.com/katef/libfsm) to check for unexpected token conflicts (with `re(1)`)
+
 ## Future Work
 
 - Check LL(k) for k > 1
+- Better handling of underscore prefix
 - Handle rule elt labels in non-trivial ways
 - Permit control over whether optionals are expanded with extra rules or with extra alts.
 
