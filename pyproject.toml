@@ -1,0 +1,8 @@
+[project]
+name = "bnfx"
+version = "0.1.0"
+description = "Grammar slicing and dicing"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+]

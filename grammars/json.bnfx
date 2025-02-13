@@ -1,0 +1,30 @@
+source_file: value EOF;
+value
+  : object
+  | array
+  | STR
+  | NUM
+  | TRU
+  | FLS
+  | NUL
+  ;
+
+object: LCURLY members? RCURLY;
+members: member (COMMA member)*;
+member: STR COLON value;
+array: LBRACKET elements? RBRACKET;
+elements: value (COMMA value)*;
+
+LCURLY = "{";
+RCURLY = "}";
+COMMA = ",";
+COLON = ":";
+LBRACKET = "[";
+RBRACKET = "]";
+TRU = "true";
+FLS = "false";
+NUL = "null";
+NUM = [0-9]+ floatpart?;
+floatpart = "." [0-9]+ ;
+STR = ["] [^"]* ["] ;
+
