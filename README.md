@@ -232,6 +232,7 @@ elements ::=
 ## See Also
 - [kgt](https://github.com/katef/kgt): very similar functionality for a disjoint set of grammar formats
 - [libfsm](https://github.com/katef/libfsm) to check for unexpected token conflicts (with `re(1)`)
+- [grammophone](https://mdaines.github.io/grammophone/#/): a powerful BNF analyzer
 
 ## Future Work
 
