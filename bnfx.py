@@ -175,24 +175,6 @@ class Alt:
     def render_list(self, flavor: str) -> List[str]:
         return [elt.render(flavor) for elt in self.elts]
 
-    # The 'shallow' in the name reflects that we are not expanding the firsts
-    # of nonterminals we encounter; that is left to the caller.
-    def first_k_shallow(self, k: int) -> List[Optional[MixedRef]]:
-        """Returns a list of the possible first k refs (terminals or nonterminals)
-        which could start a string derived from this alt."""
-        if not self.elts:
-            return [None]
-
-        firsts = set()
-        for elt in self.elts:
-            efs = elt.firsts_shallow(explicit_epsilons=False)
-            firsts.update(set(efs))
-            if not elt.trivially_nullable():
-                break
-        if not firsts:
-            return [None]
-        return list(firsts)
-
     def firsts_shallow(self) -> List[Optional[MixedRef]]:
         if not self.elts:
             return [None]
