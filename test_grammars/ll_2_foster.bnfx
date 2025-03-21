@@ -1,0 +1,178 @@
+module  :       imports* decl_or_defn* EOF;
+imports :       INCLUDE id DQUO_STR SEMI;
+decl_or_defn :
+        REC? x ( DCOLON t SEMI
+                 | EQ phrase SEMI
+                 )
+        | data_defn SEMI
+        | effect_defn SEMI
+        | FOREIGN IMPORT x (AS id)? DCOLON t SEMI
+        | FOREIGN TYPE tyformal   SEMI
+        ;
+
+data_defn : TYPE CASE tyformal
+                         (LPAREN tyformal RPAREN)*
+                         data_ctor*;
+data_ctor : OF dctor tatom*;
+
+effect_defn : EFFECT tyformal
+                         (LPAREN tyformal RPAREN)*
+                         effect_ctor*;
+effect_ctor : OF dctor tatom* (DARROW t)?;
+
+opr     :       SYMBOL | MINUS;
+id      :       SMALL_IDENT | UPPER_IDENT | UNDER_IDENT;
+idterm	:	id;
+x       :       nameunq;
+a       :       nameunq;
+nameunq :      id |  LPAREN opr RPAREN;
+
+pid     :      id;
+xid     :      nameunq;
+aid     :      id;
+
+ctor  :     x;
+dctor : DOLLAR ctor;
+tctor : DOLLAR ctor;
+
+k       :     a;
+
+stmts   :  stmt_ stmt_cont* SEMI?;
+stmt_   : abinding | e ;
+stmt_cont : SEMI+ stmt_;
+
+abinding : REC pbinding
+         |       pbinding;
+pbinding  : patbind EQUALS e;
+
+patbind :
+  idterm
+  | UNDER
+  | LET LPAREN p (COMMA p)* RPAREN
+  ;
+
+e       : phrase binops?;
+binops  : (binop phrase)+;
+binop   : opr
+        | BACKTICK nameunq  BACKTICK
+        ;
+
+nopr    : nameunq | opr ;
+phrase  :       lvalue+
+        |       PRIM nopr tyapp? lvalue*;
+lvalue  :       atom suffix*;
+
+tyapp   :	CLNLBRACK t (COMMA t)* RBRACK
+        |	CLNLBRACK  RBRACK
+        ;
+
+suffix  :  tyapp
+        |  CARET          
+        |  DOTLBRACK e RBRACK   
+        |  BANG
+        |  DOT id	
+  ;
+
+atom    :
+    x    
+  | lit  
+  | ifexpr
+  | CASE e (OF pmatch)+ END 
+  | LPAREN RPAREN                     
+  | tuple_or_record
+  | handler
+  | val_abs
+  ;
+
+val_abs :
+    LCURLY (FORALL tyformal* COMMA)?
+        (formal DARROW)*
+         stmts?
+    RCURLY
+    ;
+
+tuple_or_record :
+   LPAREN
+        e
+        ( AS  t    RPAREN       
+        | (COMMA e)* RPAREN hashq 
+        | COLON e (COMMA x COLON e)* RPAREN  
+        )
+      ;
+
+hashq : HASH?;
+
+handler : HANDLE e
+          effmatch*
+          (AS e)?
+          END
+          ;
+effmatch : OF patside SARROW stmts;
+
+pmatch  : p (IF e)? SARROW stmts;
+
+p : patside ((OR patside)+
+             |              
+            );
+
+patside
+  : dctor patom*
+  | patom
+  ;
+
+patom :
+    idterm
+  | UNDER
+  | lit
+  | LPAREN ( RPAREN
+        | p (COMMA p)* RPAREN
+        )
+  ;
+
+lit     : num | str | TRU| FLS;
+str     : STRING;
+
+ifexpr : IF stmts THEN stmts (ELSE stmts)? END;
+
+formal   : pid (COLON t)? ;
+tyformal : aid (COLON k)? ;
+tyformalr: LBRACK aid COLON k RBRACK ;
+
+t  : PCTSIGN xid COLON tp COLON e
+   | tp;
+
+tp : tatom tatom*
+  | FORALL tyformalr+ t
+  ;
+
+
+minusq : MINUS ? ;
+single_effect : minusq a tatom*;
+
+effect : ATSIGN (  idterm
+             | LPAREN RPAREN
+             | LPAREN
+                  single_effect (COMMA single_effect)*
+                  (VERTBAR aid?)?
+               RPAREN );
+tatom :
+    a                         
+  | DBLQUEST a                    
+  | tuple_or_record_ty
+  |
+    LCURLY t  (DARROW t)* effect? RCURLY 
+  ;
+
+tuple_or_record_ty 
+	:	  LPAREN RPAREN      
+	| LPAREN t
+		(
+		  TRICOLON t (COMMA x TRICOLON t)* RPAREN 
+		| (COMMA t)* RPAREN hashq        
+		)
+	;
+
+tannots   : tabinding (COMMA tabinding)*;
+tabinding : x EQUALS e                   ;
+
+num : NUM;

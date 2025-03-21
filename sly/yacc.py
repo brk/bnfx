@@ -280,7 +280,7 @@ class Production(object):
         p = LRItem(self, n)
         # Precompute the list of productions immediately following.
         try:
-            p.lr_after = Prodnames[p.prod[n+1]]
+            p.lr_after = Prodnames[p.prod[n+1]] # pyright: ignore
         except (IndexError, KeyError):
             p.lr_after = []
         try:

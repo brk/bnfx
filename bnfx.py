@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from typing import List, Optional, Tuple, Set
 import enum
 import pprint
+import sys
 
 class GrammarFlavor(enum.Enum):
     LEMON = 'lemon'
@@ -173,6 +174,24 @@ class Alt:
 
     def render_list(self, flavor: str) -> List[str]:
         return [elt.render(flavor) for elt in self.elts]
+
+    # The 'shallow' in the name reflects that we are not expanding the firsts
+    # of nonterminals we encounter; that is left to the caller.
+    def first_k_shallow(self, k: int) -> List[Optional[MixedRef]]:
+        """Returns a list of the possible first k refs (terminals or nonterminals)
+        which could start a string derived from this alt."""
+        if not self.elts:
+            return [None]
+
+        firsts = set()
+        for elt in self.elts:
+            efs = elt.firsts_shallow(explicit_epsilons=False)
+            firsts.update(set(efs))
+            if not elt.trivially_nullable():
+                break
+        if not firsts:
+            return [None]
+        return list(firsts)
 
     def firsts_shallow(self) -> List[Optional[MixedRef]]:
         if not self.elts:
@@ -607,7 +626,7 @@ class Bnfx:
             for alt in r.alts:
                 consider_alt(alt)
         return ts
-
+    
     def firsts(self) -> dict:
         nonterms = self.nonterminals()
         first = {nt: set() for nt in nonterms}
@@ -707,6 +726,195 @@ class Bnfx:
 
         return BnfxRaw(samerules + genrules, self.lexerrules).cook()
 
+def check_ll_k(b: Bnfx, k: int) -> bool:
+    # It's interesting to compare this general case implementation
+    # to the special case of k=1, which is about half the size and
+    # rather less than half the complexity...
+
+    def validate_ll(b: Bnfx, k: int) -> bool:
+        first_k = first_ks(b, k)
+        nonterms = b.nonterminals()
+
+        def finalize_alt(alt):
+            expanded_seqs = []
+            shallows = Alt_first_shallow_k([[]], alt, k)
+            for seq in shallows:
+                expanded_seqs.extend(expand_nt_in(seq, k, nonterms, lambda x: first_k[x]))
+
+            return set(tuple(s[:k]) for s in expanded_seqs)
+        
+        for nt in first_k.keys():
+            r = b.rule(nt)
+            alts_firsts = [(alt, finalize_alt(alt)) for alt in r.alts]
+            for i in range(len(alts_firsts)):
+                for j in range(i):
+                    intersection = alts_firsts[i][1] & alts_firsts[j][1]
+                    if intersection:
+                        inputseq = ' '.join(list(intersection)[0])
+                        print(f"rule {nt} is not LL(k={k}) due to ambiguity when reading input sequence: {inputseq}")
+                        pprint.pprint(alts_firsts)
+                        return False
+        return True
+    
+    def first_ks(b: Bnfx, k: int) -> dict:
+        nonterms = b.nonterminals()
+        # first_k is the set of strings of terminals of length at most k
+        # which could start a string derived from the nonterminal.
+        first_k = {nt: set() for nt in nonterms}
+        first_k_status = {nt: 0 for nt in nonterms} # status: 0=unseen, 1=started, 2=done
+
+        # Calls nt_alt_first_k() on each alternative of the rule.
+        def nt_first_k(nt):
+            if first_k_status[nt] == 2:
+                return first_k[nt]
+            elif first_k_status[nt] == 1:
+                return {(nt, )} # cycle; expand later.
+            
+            first_k_status[nt] = 1
+
+            r = b.rule(nt)
+            for seq in Alts_first_shallow_k([[]], r.alts, k):
+                for expanded_seq in expand_nt_in(seq, k, nonterms, nt_first_k):
+                    first_k[nt].add(tuple(expanded_seq[:k]))
+
+            first_k_status[nt] = 2
+            return first_k[nt]
+
+        for nt in b.nonterminals():
+            nt_first_k(nt)
+
+        # At this point, first_k may contain residual nonterminal references.
+        # Left recursive occurrences should be deleted; other occurrences expanded.
+        for nt in b.nonterminals():
+            expanded = []
+            for seq in first_k[nt]:
+                if seq and seq[0] == nt:
+                    continue
+                expanded.extend(expand_nt_in(seq, k, nonterms, nt_first_k))
+            first_k[nt] = set(tuple(s[:k]) for s in expanded)
+
+        return first_k
+
+    # Expands the nonterminals in a sequence of nonterminals and terminals.
+    # The length of each returned sequence may exceed maxk.
+    def expand_nt_in(seq, maxk: int, nonterms, get_first_ks) -> List[List[str]]:
+        if maxk <= 0:
+            return []
+
+        terminals = []
+        for n, x in enumerate(seq):
+            if x in nonterms:
+                suffixes = expand_nt_in(seq[n+1:], maxk - len(terminals), nonterms, get_first_ks)
+                expansions = []
+                for e in get_first_ks(x):
+                    for suffix in suffixes:
+                        expansions.append(terminals + list(e) + suffix)
+                return expansions
+            else:
+                terminals.append(x)
+                if len(terminals) == maxk:
+                    return [terminals] # might as well halt early
+
+        return [terminals]
+
+    def Alt_first_shallow_k(prefixes: List[List[MixedRef]], alt: Alt, k: int) -> List[List[MixedRef]]:
+        done_prefixes = []
+        
+        for elt in alt.elts:
+            if not prefixes:
+                break # we hit the k limit already, e.g. k=2 and elts was A B c d.
+                # prefixes would go [[]] => [[A]] => [[A, B]] => []
+            prefixes = Elt_first_shallow_k(prefixes, elt, k)
+            non_full_prefixes = []
+            for prefix in prefixes:
+                if len(prefix) < k:
+                    non_full_prefixes.append(prefix)
+                else:
+                    done_prefixes.append(tuple(prefix))
+            prefixes = non_full_prefixes
+
+        # Add any stragglers, even if they aren't full.
+        for prefix in prefixes:
+            done_prefixes.append(tuple(prefix))
+        return done_prefixes
+
+    def Alts_first_shallow_k(prefixes: List[List[MixedRef]], alts: List[Alt], k: int) -> List[List[MixedRef]]:
+        prefix_set = set()
+        for alt in alts:
+            alt_prefixes = Alt_first_shallow_k(prefixes, alt, k)
+            for prefix in alt_prefixes:
+                prefix_set.add(tuple(prefix))
+        return [list(p) for p in prefix_set]
+
+    def prefix_ext_up_to_k(prefix: List[MixedRef], mr: MixedRef, min_ext: int, k: int) -> List[List[MixedRef]]:
+        if len(prefix) >= k:
+            return [prefix]
+        extensions = []
+        for i in range(min_ext, k - len(prefix) + 1): # want to get seqs of len = k, not < k.
+            extensions.append(prefix + [mr] * i)
+        return extensions
+
+    def AtomRef_first_shallow_k(prefixes: List[List[MixedRef]], ref: MixedRef, suffix: str, k: int) -> List[Optional[MixedRef]]:
+        new_prefixes = []
+        match suffix:
+            case "":
+                for p in prefixes:
+                    if len(p) < k:
+                        new_prefixes.append(p + [ref])
+                    else:
+                        new_prefixes.append(p)
+            case "?":
+                for p in prefixes:
+                    if len(p) < k:
+                        new_prefixes.append(p + [ref])
+                    new_prefixes.append(p)
+            case "*":
+                for p in prefixes:
+                    new_prefixes.extend(prefix_ext_up_to_k(p, ref, 0, k))
+            case "+":
+                for p in prefixes:
+                    new_prefixes.extend(prefix_ext_up_to_k(p, ref, 1, k))
+        return new_prefixes
+
+    def tupleset_of_list(seqs):
+        return set(tuple(seq) for seq in seqs)
+
+    def list_of_tupleset(seqs):
+        return [list(seq) for seq in seqs]
+
+    def Elt_first_shallow_k(prefixes: List[List[MixedRef]], elt: Elt, k: int) -> List[List[MixedRef]]:
+        match elt.atom:
+            case AtomBlock(alts):
+                match elt.suffix:
+                    case "":
+                        return Alts_first_shallow_k(prefixes, alts, k)
+                    case "*":
+                        alts_or_empty = [Alt(elts=[])] + alts
+                        while True:
+                            new_prefixes = Alts_first_shallow_k(prefixes, alts_or_empty, k)
+                            if tupleset_of_list(new_prefixes) == tupleset_of_list(prefixes):
+                                return prefixes
+                            prefixes = new_prefixes
+                    case "+":
+                        while True:
+                            new_prefixes = Alts_first_shallow_k(prefixes, alts, k)
+                            if tupleset_of_list(new_prefixes) == tupleset_of_list(prefixes):
+                                return prefixes
+                            prefixes = new_prefixes
+                    case "?":
+                        new_prefixes = Alts_first_shallow_k(prefixes, alts, k)
+                        return list_of_tupleset(tupleset_of_list(prefixes) | tupleset_of_list(new_prefixes))
+
+            case AtomTerminal(tokref):
+                return AtomRef_first_shallow_k(prefixes, tokref, elt.suffix, k)
+                    
+            case AtomNonterm(rulref):
+                return AtomRef_first_shallow_k(prefixes, rulref, elt.suffix, k)
+
+
+    return validate_ll(b, k)
+    
+
 def render_bnf(b: Bnfx, rulesep: str, left_recursion):
     norm = b.normalize_bnf(left_recursion)
     lines = []
@@ -734,9 +942,13 @@ class BnfxRaw:
 
 
 class BnfxLexer(Lexer):
-    tokens = { TOKREF, RULREF, EBNFSUFFIX , LABELOP, VBAR, REGEX_CLASS, REGEX_DQUO }
-    ignore = ' \t\n'
+    tokens = { TOKREF, RULREF, EBNFSUFFIX , LABELOP, VBAR, REGEX_CLASS, REGEX_DQUO } # pyright: ignore
+    ignore = ' \t'
     literals = { ':', ';', '(', ')', '"', '=' }
+
+    # This silliness is from Pyright not quite following
+    # David Beazley's ultimate coding powers.
+    _ = _ # pyright: ignore
 
     RULREF = r'_?[a-z][a-zA-Z0-9_]*'
     TOKREF = r'_?[A-Z][a-zA-Z0-9_]*'
@@ -747,6 +959,10 @@ class BnfxLexer(Lexer):
     REGEX_CLASS = r'[\[][^\]]+[]]'
     REGEX_DQUO= r'"[^"]+"'
 
+    @_(r'\n+')
+    def ignore_newline(self, t):
+        self.lineno += len(t.value)
+
     def error(self, t):
         print("Illegal character '%s'" % t.value[0])
         self.index += 1
@@ -756,6 +972,10 @@ def untuple(xs, idx=0):
 
 class BnfxParser(Parser):
     tokens = BnfxLexer.tokens
+
+    # This silliness is from Pyright not quite following
+    # David Beazley's ultimate coding powers.
+    _ = _ # pyright: ignore
 
     def __init__(self):
         pass
@@ -858,7 +1078,6 @@ class BnfxParser(Parser):
     def regex_atom(self, p):
         return p.regex
 
-
 def Diagram_for_Rule(r: Rule, rulename_as_comment=True):
     import railroad
 
@@ -880,7 +1099,7 @@ def Diagram_for_Rule(r: Rule, rulename_as_comment=True):
             case "*":
                 return railroad.ZeroOrMore(item, repeat=None, skip=False)
             case "+":
-                return railroad.OneOrMore(item, repeat=None, skip=False)
+                return railroad.OneOrMore(item, repeat=None)
             case "":
                 return item
 
@@ -893,6 +1112,8 @@ def Diagram_for_Rule(r: Rule, rulename_as_comment=True):
             return railroad.Group(item, e.label[0])
 
     def Alt_item(a: Alt):
+        if not a.elts:
+            return railroad.Skip()
         items = [Elt_item(e) for e in a.elts]
         return railroad.Sequence(*items)
 
@@ -906,15 +1127,11 @@ def Diagram_for_Rule(r: Rule, rulename_as_comment=True):
         return railroad.Diagram(Alts(r.alts))
 
 def Rr_print_text(b: Bnfx):
-    import sys
-
     for r in b.rules:
         d = Diagram_for_Rule(r, rulename_as_comment=False)
         print(r.name, "::=")
         d.writeText(sys.stdout.write)
         print()
-
-
 
 def example_ebnf_grammar():
     return """
@@ -927,14 +1144,10 @@ def main():
     parser = argparse.ArgumentParser(description="Process a BNFX file.")
     parser.add_argument("bnfxpath", type=str, help="Path to the input file")
     parser.add_argument("--to", type=str, help="Grammar flavor (lemon, antlr, grammophone, treesitter), debug format (dict, repr, misc), railroad format (rrtext, rrhtml), codegen target (rs)", default="rrtext")
+    parser.add_argument("--ll", type=int, help="LL(k) checking", default=0)
 
     # Parse the arguments
     args = parser.parse_args()
-
-    if not args.bnfxpath:
-        print("Must supply a path to an input BNFX file.")
-        print("Try using    grammars/json.bnfx")
-        sys.exit(1)
 
     text = open(args.bnfxpath, 'r').read()
 
@@ -943,6 +1156,23 @@ def main():
 
     rvraw = parser.parse(lexer.tokenize(text))
     rv = rvraw.cook()
+
+    if args.ll > 0:
+        if False:
+            pprint.pprint(rv.firsts())
+
+            k1d = first_ks(rv, 1)
+            # k1d has single-element tuples, we want to see plain strings for comparison.
+            k1d_norm = {k: {t[0] if t else t for t in v} for k, v in k1d.items()}
+            pprint.pprint(k1d_norm)
+
+            pprint.pprint(k1d)
+
+        #pprint.pprint(first_ks(rv, args.ll))
+
+        if not check_ll_k(rv, args.ll):
+            sys.exit(1)
+        return
 
     match args.to:
         case "antlr":

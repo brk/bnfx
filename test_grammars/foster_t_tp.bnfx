@@ -1,0 +1,19 @@
+module  :       t EOF;
+
+t  : PCTSIGN id
+   | tatom+
+   ;
+
+tatom
+	: LPAREN t
+		(
+		  TRICOLON t (COMMA x TRICOLON t)* RPAREN 
+		| (COMMA t)* RPAREN 
+		)
+	;
+
+
+
+
+id      :       SMALL_IDENT | UPPER_IDENT | UNDER_IDENT;
+
