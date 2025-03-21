@@ -236,7 +236,6 @@ elements ::=
 
 ## Future Work
 
-- Check LL(k) for k > 1
 - Better handling of underscore prefix
 - Handle rule elt labels in non-trivial ways
 - Permit control over whether optionals are expanded with extra rules or with extra alts.
