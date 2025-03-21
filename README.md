@@ -23,6 +23,10 @@ Generally, those sorts of assumptions are not checked,
 since it is anticipated that external tools will be doing the checking.
 As is, bnfx is not meant to be a standalone one-stop-shop sort of tool.
 
+The code uses syntax that requires Python 3.12+. If you have an older
+version of Python, I recommend using [uv](https://docs.astral.sh/uv/).
+If you have a new enough Python, you should be able to replace
+`uv run` with `python3` in the examples below.
 
 ## Usage
 
